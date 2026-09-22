@@ -1,0 +1,52 @@
+[
+  {
+    "id": "biz_001",
+    "name": "Linear",
+    "url": "https://linear.app",
+    "description": "Issue tracking and project management tool built for modern high-performance software teams.",
+    "location": "San Francisco, United States",
+    "category": "Project Management",
+    "scope": "global",
+    "expected_competitors": ["Jira", "Asana", "ClickUp", "Height", "Monday.com"]
+  },
+  {
+    "id": "biz_002",
+    "name": "Supabase",
+    "url": "https://supabase.com",
+    "description": "Open source Firebase alternative providing Postgres database, Authentication, instant APIs, Edge Functions, Realtime subscriptions, and Storage.",
+    "location": "Singapore",
+    "category": "Backend as a Service",
+    "scope": "global",
+    "expected_competitors": ["Firebase", "Appwrite", "Nhost", "PocketBase"]
+  },
+  {
+    "id": "biz_003",
+    "name": "Gymbox",
+    "url": "https://gymbox.com",
+    "description": "High-end fitness club and gym chain located across London offering combat sports, dance, and holistic classes.",
+    "location": "London, United Kingdom",
+    "category": "Fitness & Gym",
+    "scope": "local",
+    "expected_competitors": ["Third Space", "Equinox London", "PureGym", "1Rebel"]
+  },
+  {
+    "id": "biz_004",
+    "name": "Stripe",
+    "url": "https://stripe.com",
+    "description": "Financial infrastructure platform for online payments, billing, and fraud prevention.",
+    "location": "San Francisco, United States",
+    "category": "Payment Gateway",
+    "scope": "global",
+    "expected_competitors": ["Adyen", "PayPal", "Braintree", "Checkout.com"]
+  },
+  {
+    "id": "biz_005",
+    "name": "Delivery Hero",
+    "url": "https://deliveryhero.com",
+    "description": "Global online food ordering and quick commerce delivery network headquartered in Berlin.",
+    "location": "Berlin, Germany",
+    "category": "Food Delivery",
+    "scope": "global",
+    "expected_competitors": ["Just Eat Takeaway", "Deliveroo", "Uber Eats", "DoorDash"]
+  }
+]
