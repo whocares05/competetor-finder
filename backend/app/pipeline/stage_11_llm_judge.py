@@ -78,6 +78,7 @@ INSTRUCTIONS:
 2. Sort competitors by match_score descending.
 3. Return up to {target_count} competitors.
 4. Set shortfall=true if count < {target_count}.
+5. Product & Brand Disambiguation: If a candidate represents a prominent product line or division (e.g. 'Google Pixel', 'AWS', 'Microsoft Azure'), evaluate the competitive overlap against the relevant parent brand/division and output the proper competitor name.
 """
 
     try:

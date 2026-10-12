@@ -1,6 +1,6 @@
 """Pipeline Stage 07: Candidate Extraction from titles, snippets, and verified hits"""
 import re
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 from app.providers.base import SearchResultItemDTO
 from app.schemas.llm import CompactCandidateCard
 from app.pipeline.stage_06_consensus_scoring import is_blocklisted_domain, get_hit_candidate_key
@@ -71,12 +71,28 @@ def extract_entities_from_snippet(text: str, target_name: Optional[str] = None) 
             if len(cand) >= 2 and cand.lower() != target_clean:
                 found.append(cand)
 
-    # 3. 'competitors are/include X, Y, Z'
-    comp_match = re.search(r'competitors (?:are|include)\s+([^.]+)', text, re.IGNORECASE)
-    if comp_match:
-        items = re.split(r'[,;]|(?:\band\b)', comp_match.group(1))
+    # 3. Competitor list patterns in text (e.g. 'competitors include X, Y', 'competitors: X, Y', 'rivals include X, Y', 'competition from X, Y')
+    comp_matches = re.finditer(
+        r'(?:competitors|rivals|alternatives|peers)(?:\s+(?:are|include)|:)\s+([^.\n]+)',
+        text,
+        re.IGNORECASE
+    )
+    for cm in comp_matches:
+        items = re.split(r'[,;]|(?:\band\b)', cm.group(1))
         for item in items:
-            cand = item.strip(' .·•-')
+            cand = re.sub(r'\s+(?:in|for|across|such as|including|and more)\b.*$', '', item, flags=re.I).strip(' .·•-')
+            if len(cand) >= 2 and cand.lower() != target_clean and not re.search(r'\d+\s+more', cand, re.I):
+                found.append(cand)
+
+    comp_from_matches = re.finditer(
+        r'(?:competition from|competes with)\s+([^.\n]+)',
+        text,
+        re.IGNORECASE
+    )
+    for cm in comp_from_matches:
+        items = re.split(r'[,;]|(?:\band\b)', cm.group(1))
+        for item in items:
+            cand = re.sub(r'\s+(?:in|for|across|such as|including|and more)\b.*$', '', item, flags=re.I).strip(' .·•-')
             if len(cand) >= 2 and cand.lower() != target_clean and not re.search(r'\d+\s+more', cand, re.I):
                 found.append(cand)
 
@@ -95,6 +111,43 @@ def extract_entities_from_snippet(text: str, target_name: Optional[str] = None) 
         if f.lower() not in [x.lower() for x in res]:
             res.append(f)
     return res
+
+def resolve_canonical_domain(
+    name: str,
+    hit_domain: Optional[str],
+    hit_url: Optional[str],
+    canonical_domain_map: Dict[str, Tuple[str, str]],
+) -> Tuple[str, str, bool]:
+    """
+    Resolve authentic, canonical corporate domain and URL for a candidate entity.
+    Returns: (domain, source_url, is_synthetic_domain)
+    """
+    # 1. If hit already carries a verified authentic domain (e.g. from Knowledge Graph website or organic search)
+    if hit_domain and hit_domain not in ("knowledge_graph", "maps.google.com") and not is_blocklisted_domain(hit_domain):
+        clean_d = hit_domain.lower().strip()
+        return clean_d, hit_url or f"https://{clean_d}", False
+
+    ent_key = re.sub(r"[^a-z0-9]", "", name.lower())
+
+    # 2. Exact match in canonical domain map
+    if ent_key in canonical_domain_map:
+        d, u = canonical_domain_map[ent_key]
+        return d, u, False
+
+    # 3. Match individual significant word tokens (e.g. "Samsung" from "Samsung Electronics")
+    words = re.findall(r"[a-z0-9]+", name.lower())
+    for w in words:
+        if len(w) >= 3 and w in canonical_domain_map:
+            d, u = canonical_domain_map[w]
+            return d, u, False
+
+    # 4. Match substring/stem in canonical domain map (e.g. known domain stem "samsung" in "samsungelectronics")
+    for known_key, (d, u) in canonical_domain_map.items():
+        if len(known_key) >= 3 and (known_key in ent_key or ent_key in known_key):
+            return d, u, False
+
+    # 5. Fallback: synthesize domain from entity key
+    return f"{ent_key}.com", hit_url or f"https://{ent_key}.com", True
 
 
 async def run_stage_07_extract_candidates(
@@ -119,6 +172,27 @@ async def run_stage_07_extract_candidates(
     seen_keys = set()
     target_clean = (target_name or "").lower().strip()
 
+    # Build canonical domain map from verified organic hits and Knowledge Graph hits
+    canonical_domain_map: Dict[str, Tuple[str, str]] = {}
+    for hit in search_hits:
+        if not hit.domain or is_blocklisted_domain(hit.domain) or hit.domain in ("knowledge_graph", "maps.google.com"):
+            continue
+        clean_d = hit.domain.lower().strip()
+        stem = clean_d.split(".")[0]
+        url = hit.url or f"https://{clean_d}"
+        if stem and len(stem) >= 2 and stem != target_clean:
+            canonical_domain_map.setdefault(stem, (clean_d, url))
+
+        hit_brand = clean_brand_name(hit.title, hit.domain)
+        hit_brand_key = re.sub(r"[^a-z0-9]", "", hit_brand.lower())
+        if hit_brand_key and len(hit_brand_key) >= 2 and hit_brand_key != target_clean:
+            canonical_domain_map.setdefault(hit_brand_key, (clean_d, url))
+
+        if hit.engine == "knowledge_graph" and hit.title:
+            kg_key = re.sub(r"[^a-z0-9]", "", hit.title.lower())
+            if kg_key and kg_key != target_clean:
+                canonical_domain_map[kg_key] = (clean_d, url)
+
     # 1. First, extract direct company domains from search hits (skipping obvious listicle articles)
     for cand_key, hits in grouped_hits.items():
         if cand_key in seen_keys:
@@ -137,6 +211,12 @@ async def run_stage_07_extract_candidates(
         if not name or name.lower() == target_clean:
             continue
 
+        name_key = re.sub(r"[^a-z0-9]", "", name.lower())
+        if name_key:
+            seen_keys.add(name_key)
+        if best_hit.domain:
+            seen_keys.add(best_hit.domain.lower())
+
         # Combine snippets to form rich description
         snippets = []
         for h in hits:
@@ -153,24 +233,58 @@ async def run_stage_07_extract_candidates(
             )
         )
 
-    # 2. Second, extract individual brand/company competitors mentioned inside comparison & listicle snippets
+    # 2. Second, extract Knowledge Graph entities and brand/company competitors mentioned in snippets
     for hit in search_hits:
+        # Knowledge Graph & People Also Search For entities
+        if hit.engine == "knowledge_graph":
+            clean_name = hit.title.strip()
+            ent_key = re.sub(r"[^a-z0-9]", "", clean_name.lower())
+            if ent_key and len(clean_name) >= 2 and clean_name.lower() != target_clean:
+                domain, source_url, is_synth = resolve_canonical_domain(
+                    name=clean_name,
+                    hit_domain=hit.domain if hit.domain != "knowledge_graph" else None,
+                    hit_url=hit.url,
+                    canonical_domain_map=canonical_domain_map,
+                )
+                if ent_key not in seen_keys and domain not in seen_keys:
+                    seen_keys.add(ent_key)
+                    seen_keys.add(domain)
+                    candidates.append(
+                        CompactCandidateCard(
+                            name=clean_name,
+                            domain=domain,
+                            description=f"Identified by Google Knowledge Graph as market competitor: {hit.snippet[:250]}",
+                            source_url=source_url,
+                            is_synthetic_domain=is_synth,
+                        )
+                    )
+            continue
+
         if not hit.snippet:
             continue
         snippet_entities = extract_entities_from_snippet(hit.snippet, target_name)
         for ent_name in snippet_entities:
             clean_name = ent_name.strip()
             ent_key = re.sub(r"[^a-z0-9]", "", clean_name.lower())
-            if ent_key and ent_key not in seen_keys and len(clean_name) >= 3 and clean_name.lower() != target_clean:
-                seen_keys.add(ent_key)
-                candidates.append(
-                    CompactCandidateCard(
-                        name=clean_name,
-                        domain=f"{ent_key}.com",
-                        description=f"Identified as market competitor in verified search results: {hit.snippet[:250]}",
-                        source_url=hit.url,
-                    )
+            if ent_key and len(clean_name) >= 3 and clean_name.lower() != target_clean:
+                domain, source_url, is_synth = resolve_canonical_domain(
+                    name=clean_name,
+                    hit_domain=None,
+                    hit_url=hit.url,
+                    canonical_domain_map=canonical_domain_map,
                 )
+                if ent_key not in seen_keys and domain not in seen_keys:
+                    seen_keys.add(ent_key)
+                    seen_keys.add(domain)
+                    candidates.append(
+                        CompactCandidateCard(
+                            name=clean_name,
+                            domain=domain,
+                            description=f"Identified as market competitor in verified search results: {hit.snippet[:250]}",
+                            source_url=source_url,
+                            is_synthetic_domain=is_synth,
+                        )
+                    )
 
     # 3. Third, append cached market map candidates ONLY as fallback if live search returned fewer than 15 candidates
     if cached_candidates and len(candidates) < 15:
@@ -182,3 +296,4 @@ async def run_stage_07_extract_candidates(
                 candidates.append(c)
 
     return candidates
+

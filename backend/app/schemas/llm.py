@@ -50,6 +50,7 @@ class CompactCandidateCard(BaseModel):
     domain: str
     description: str = Field(..., max_length=1000)
     source_url: str
+    is_synthetic_domain: bool = False
 
 
 class JudgeCompetitorItem(BaseModel):

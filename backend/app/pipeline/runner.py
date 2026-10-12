@@ -195,6 +195,7 @@ async def run_search_pipeline(search_id: uuid.UUID) -> None:
                 location=search.location or profile.location,
                 country_code=profile.country_code,
                 language=profile.language or "en",
+                offerings=profile.offerings,
             )
             providers_used.append("serpapi")
             await emit_sse_event(sid_str, "stage_completed", {

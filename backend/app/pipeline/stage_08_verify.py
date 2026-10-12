@@ -75,6 +75,11 @@ async def run_stage_08_verify(
     for cand, is_live in zip(filtered_cands, results):
         if is_live is True:
             verified.append(cand)
+        elif getattr(cand, "is_synthetic_domain", False):
+            # If the domain was synthesized for an entity found in an authoritative search snippet or Knowledge Graph,
+            # do not disqualify the candidate simply because our .com guess failed DNS.
+            logger.info(f"Retaining snippet/graph candidate '{cand.name}' despite synthetic domain '{cand.domain}' failing DNS probe.")
+            verified.append(cand)
         else:
             unverified.append(cand)
 

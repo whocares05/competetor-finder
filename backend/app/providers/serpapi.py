@@ -181,4 +181,73 @@ class SerpAPIAdapter(BaseSearchProvider):
             )
             position_counter += 1
 
+        # 4. Mine Knowledge Graph main entity & People Also Search For (High-authority entity rivals)
+        kg = data.get("knowledge_graph", {})
+        if isinstance(kg, dict) and kg:
+            kg_title = (kg.get("title") or "").strip()
+            kg_website = kg.get("website") or kg.get("official_website") or ""
+            if isinstance(kg_website, dict):
+                kg_website = kg_website.get("link") or kg_website.get("url") or ""
+            elif not kg_website and isinstance(kg.get("links"), dict):
+                kg_website = kg.get("links", {}).get("website") or ""
+
+            if kg_title and kg_website:
+                kg_domain = self._extract_domain(kg_website)
+                if kg_domain and not any(bad in kg_domain for bad in ("google.", "wikipedia.")):
+                    snippet = kg.get("description") or f"Identified by Google Knowledge Graph as verified market entity: {kg_title}"
+                    results.append(
+                        SearchResultItemDTO(
+                            title=kg_title,
+                            url=kg_website,
+                            snippet=str(snippet),
+                            domain=kg_domain,
+                            position=position_counter,
+                            engine="knowledge_graph",
+                            is_ad=False,
+                            raw_data=kg,
+                        )
+                    )
+                    position_counter += 1
+
+        pasf = (kg.get("people_also_search_for") if isinstance(kg, dict) else None) or data.get("people_also_search_for") or []
+        if isinstance(pasf, list):
+            for item in pasf:
+                if isinstance(item, dict):
+                    name = item.get("name") or item.get("title") or ""
+                    clean_name = name.strip()
+                    if not clean_name:
+                        continue
+
+                    item_website = item.get("website") or ""
+                    if isinstance(item_website, dict):
+                        item_website = item_website.get("link") or item_website.get("url") or ""
+
+                    item_link = item.get("link") or item.get("serpapi_link") or ""
+                    domain = ""
+                    if item_website:
+                        domain = self._extract_domain(item_website)
+                    elif item_link and not any(bad in item_link for bad in ("google.", "wikipedia.")):
+                        domain = self._extract_domain(item_link)
+
+                    target_url = (
+                        item_website
+                        or (item_link if not any(bad in item_link for bad in ("google.", "wikipedia.")) else "")
+                        or f"https://www.google.com/search?q={urllib.parse.quote(clean_name)}"
+                    )
+                    snippet = item.get("snippet") or f"Identified by Google Knowledge Graph as market competitor: {clean_name}"
+                    results.append(
+                        SearchResultItemDTO(
+                            title=clean_name,
+                            url=target_url,
+                            snippet=snippet,
+                            domain=domain or "knowledge_graph",
+                            position=position_counter,
+                            engine="knowledge_graph",
+                            is_ad=False,
+                            raw_data=item,
+                        )
+                    )
+                    position_counter += 1
+
         return results
+
